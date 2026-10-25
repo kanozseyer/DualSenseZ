@@ -1,5 +1,6 @@
 name: CMake on multiple platforms
 
+# DualSenseZ feature branches are built so test artifacts can be validated before merge.
 on:
   workflow_dispatch:
   push:
