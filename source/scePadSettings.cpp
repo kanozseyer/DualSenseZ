@@ -130,7 +130,6 @@ bool SaveSettingsFromString(const std::string &String, const std::string &Path)
 void applySettings(uint32_t index, s_scePadSettings settings, AudioPassthrough &audio)
 {
 	auto now = std::chrono::steady_clock::now();
-	auto sec = std::chrono::duration_cast<std::chrono::seconds>(now - startTime).count();
 	float elapsed = std::chrono::duration<float>(now - startTime).count();
 
 	float discoModeTime = fmod(elapsed * settings.discoModeSpeed, 1.0f);
@@ -187,8 +186,11 @@ void applySettings(uint32_t index, s_scePadSettings settings, AudioPassthrough &
 	audio.SetHapticIntensityByUserId(index + 1, settings.hapticIntensity);
 	audio.SetSpeakerVolumeByUserId(index + 1, (float)settings.speakerVolume / 8.0f);
 
-	int l2Value = settings.rumbleToAt_swapTriggers ? settings.rumbleFromEmulatedController.smallMotor : settings.rumbleFromEmulatedController.largeMotor;
-	int r2Value = settings.rumbleToAt_swapTriggers ? settings.rumbleFromEmulatedController.largeMotor : settings.rumbleFromEmulatedController.smallMotor;
+	// Process XInput/DS4 rumble once so grip vibration and rumble-driven adaptive
+	// triggers use the same DualSenseZ response curve.
+	s_ScePadVibrationParam processedRumble = ProcessRumble(settings);
+	int l2Value = settings.rumbleToAt_swapTriggers ? processedRumble.smallMotor : processedRumble.largeMotor;
+	int r2Value = settings.rumbleToAt_swapTriggers ? processedRumble.largeMotor : processedRumble.smallMotor;
 
 	if (settings.triggersAsButtons && (settings.usingPeerController || settings.emulatedController != (int)EmulatedController::NONE))
 	{
@@ -230,7 +232,6 @@ void applySettings(uint32_t index, s_scePadSettings settings, AudioPassthrough &
 
 			if (mode == 0)
 			{
-				// Mode 0: Vibration (Pulse_B)
 				uint8_t freq = static_cast<uint8_t>(std::clamp(static_cast<int>(5.0f + level * 30.0f), 5, 40));
 				uint8_t intensity = static_cast<uint8_t>(std::clamp(static_cast<int>(level * 255.0f), 10, 255));
 				uint8_t pos = 0;
@@ -239,7 +240,6 @@ void applySettings(uint32_t index, s_scePadSettings settings, AudioPassthrough &
 			}
 			else
 			{
-				// Mode 1: Dynamic Resistance (Feedback)
 				uint8_t force = static_cast<uint8_t>(std::clamp(static_cast<int>(std::round(level * 8.0f)), 1, 8));
 				uint8_t start = 0;
 				std::vector<uint8_t> param = { start, force };
@@ -286,15 +286,11 @@ void applySettings(uint32_t index, s_scePadSettings settings, AudioPassthrough &
 
 	if (settings.useRumbleFromEmulatedController || settings.udpConfig)
 	{
-		if (settings.rumbleFromEmulatedController.largeMotor > 0 || settings.rumbleFromEmulatedController.smallMotor > 0)
-		{
+		if (processedRumble.largeMotor > 0 || processedRumble.smallMotor > 0)
 			scePadSetVibrationMode(g_ScePad[index], SCE_PAD_RUMBLE_MODE);
-		}
 		else
-		{
 			scePadSetVibrationMode(g_ScePad[index], SCE_PAD_HAPTICS_MODE);
-		}
 
-		scePadSetVibration(g_ScePad[index], &settings.rumbleFromEmulatedController);
+		scePadSetVibration(g_ScePad[index], &processedRumble);
 	}
 }

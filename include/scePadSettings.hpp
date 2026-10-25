@@ -91,6 +91,25 @@ enum class EmulatedController {
 	DUALSHOCK4
 };
 
+struct s_RumbleProcessingSettings {
+	float overallGain = 1.0f;
+	float largeMotorGain = 1.0f;
+	float smallMotorGain = 1.0f;
+	float responseCurve = 1.0f;
+	float minimumOutput = 0.0f;
+	bool swapMotors = false;
+};
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
+	s_RumbleProcessingSettings,
+	overallGain,
+	largeMotorGain,
+	smallMotorGain,
+	responseCurve,
+	minimumOutput,
+	swapMotors
+);
+
 struct s_scePadSettings {
 	bool udpConfig = false;
 
@@ -145,6 +164,10 @@ struct s_scePadSettings {
 	uint8_t rightTriggerThreshold = 0;
 	s_ScePadVibrationParam rumbleFromEmulatedController = { 0,0 };
 	bool useRumbleFromEmulatedController = true;
+
+	// DualSenseZ rumble processing. Defaults preserve upstream behaviour.
+	s_RumbleProcessingSettings rumbleProcessing = {};
+
 	s_SceLightBar lightbarFromEmulatedController = { 0,0,0 };
 	bool useLightbarFromEmulatedController = true;
 	bool gyroToRightStick = false;
@@ -186,6 +209,46 @@ struct s_scePadSettings {
 	bool Hidden = false;
 	bool WasHidHideRanAfterLoad = true; // When config is loaded, set to false. Set to true after HidHide is ran once.
 };
+
+inline uint8_t ProcessRumbleMotor(uint8_t input, float overallGain, float motorGain, float responseCurve, float minimumOutput)
+{
+	if (input == 0)
+		return 0;
+
+	const float normalized = static_cast<float>(input) / 255.0f;
+	const float curve = std::clamp(responseCurve, 0.25f, 4.0f);
+	const float gain = std::clamp(overallGain, 0.0f, 3.0f) * std::clamp(motorGain, 0.0f, 3.0f);
+	const float floor = std::clamp(minimumOutput, 0.0f, 1.0f);
+
+	float output = std::pow(normalized, curve) * gain;
+	if (output < floor)
+		output = floor;
+	output = std::clamp(output, 0.0f, 1.0f);
+
+	return static_cast<uint8_t>(std::lround(output * 255.0f));
+}
+
+inline s_ScePadVibrationParam ProcessRumble(const s_scePadSettings& settings)
+{
+	uint8_t large = ProcessRumbleMotor(
+		settings.rumbleFromEmulatedController.largeMotor,
+		settings.rumbleProcessing.overallGain,
+		settings.rumbleProcessing.largeMotorGain,
+		settings.rumbleProcessing.responseCurve,
+		settings.rumbleProcessing.minimumOutput);
+
+	uint8_t small = ProcessRumbleMotor(
+		settings.rumbleFromEmulatedController.smallMotor,
+		settings.rumbleProcessing.overallGain,
+		settings.rumbleProcessing.smallMotorGain,
+		settings.rumbleProcessing.responseCurve,
+		settings.rumbleProcessing.minimumOutput);
+
+	if (settings.rumbleProcessing.swapMotors)
+		std::swap(large, small);
+
+	return { large, small };
+}
 
 #pragma pack(push, 1)
 // For online, only plain controller settings.
@@ -250,6 +313,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
 	leftTriggerThreshold,
 	rightTriggerThreshold,
 	useRumbleFromEmulatedController,
+	rumbleProcessing,
 	useLightbarFromEmulatedController,
 	gyroToRightStick,
 	gyroToRightStickPermanent,
